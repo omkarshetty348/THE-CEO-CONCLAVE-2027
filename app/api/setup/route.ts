@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import prisma from "@/lib/prisma";
-import { execSync } from "child_process";
 
 const schema = z.object({
   name: z.string().min(2).max(100),
@@ -12,8 +11,11 @@ const schema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    // Check if already set up
-    const existingUsers = await prisma.user.count().catch(() => 0);
+    // Verify the database is reachable before checking setup state.
+    await prisma.$executeRawUnsafe("SELECT 1");
+
+    // Check if already set up. Do not treat database errors as an empty database.
+    const existingUsers = await prisma.user.count();
     if (existingUsers > 0) {
       return NextResponse.json(
         { error: "Setup has already been completed." },
@@ -31,22 +33,6 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, email, password } = parsed.data;
-
-    // Push schema to database (works without migrate CLI in many cases)
-    try {
-      // Prisma db push is ideal here; we rely on postinstall + generate
-      // The schema is already generated via postinstall
-      await prisma.$executeRawUnsafe(`SELECT 1`); // connectivity check
-    } catch (e) {
-      console.error("DB connection error during setup:", e);
-      return NextResponse.json(
-        {
-          error:
-            "Cannot connect to database. Please check DATABASE_URL in Vercel environment variables.",
-        },
-        { status: 500 }
-      );
-    }
 
     // Ensure roles exist (seed may not have run)
     let superAdminRole = await prisma.role.findUnique({

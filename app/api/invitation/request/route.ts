@@ -4,6 +4,8 @@ import prisma from "@/lib/prisma";
 import { generateReferenceId } from "@/lib/utils";
 import { sendTemplateEmail, isEmailConfigured } from "@/lib/email";
 
+export const runtime = "nodejs";
+
 const schema = z.object({
   fullName: z.string().min(2).max(100),
   email: z.string().email().max(150),
@@ -16,8 +18,8 @@ const schema = z.object({
   linkedinUrl: z.string().url().optional().or(z.literal("")).nullable(),
   whyAttend: z.string().max(1000).optional().nullable(),
   studentIdOrCollege: z.string().max(150).optional().nullable(),
-  privacyConsent: z.boolean().refine((v) => v === true, "Privacy consent required"),
-  termsConsent: z.boolean().refine((v) => v === true, "Terms consent required"),
+  privacyConsent: z.boolean().refine((value) => value === true, "Privacy consent required"),
+  termsConsent: z.boolean().refine((value) => value === true, "Terms consent required"),
   mediaConsent: z.boolean().optional(),
 });
 
@@ -25,37 +27,31 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const parsed = schema.safeParse(body);
-
     if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.errors[0]?.message || "Invalid input" }, { status: 400 });
+    }
+
+    if (!process.env.DATABASE_URL) {
       return NextResponse.json(
-        { error: parsed.error.errors[0]?.message || "Invalid input" },
-        { status: 400 }
+        { error: "The invitation system is not connected to its database yet. Please contact the event organisers." },
+        { status: 503 }
       );
     }
 
     const data = parsed.data;
     const email = data.email.toLowerCase().trim();
-
-    // Duplicate check: one active request per email
     const existing = await prisma.invitationRequest.findFirst({
-      where: {
-        email,
-        status: { in: ["Pending", "Approved", "Waitlisted"] },
-      },
+      where: { email, status: { in: ["Pending", "Approved", "Waitlisted"] } },
     });
 
     if (existing) {
       return NextResponse.json(
-        {
-          error:
-            "An active invitation request already exists for this email. Please check your status or contact the organisers.",
-        },
+        { error: "An active invitation request already exists for this email. Please check your status or contact the organisers." },
         { status: 409 }
       );
     }
 
     const referenceId = generateReferenceId();
-
     const request = await prisma.invitationRequest.create({
       data: {
         referenceId,
@@ -77,7 +73,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Send confirmation email (non-blocking)
     if (isEmailConfigured()) {
       sendTemplateEmail("request_received", email, {
         attendee_name: data.fullName,
@@ -89,14 +84,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       referenceId: request.referenceId,
-      message:
-        "Your invitation request has been received. You will receive a confirmation email shortly.",
+      message: "Your invitation request has been received. You will receive a confirmation email shortly.",
     });
   } catch (error) {
     console.error("Invitation request error:", error);
+    const code = (error as { code?: string })?.code;
+    if (code === "P2021" || code === "P2022") {
+      return NextResponse.json(
+        { error: "The event database tables are not initialized yet. Please contact the event organisers." },
+        { status: 503 }
+      );
+    }
     return NextResponse.json(
-      { error: "Unable to process request. Please try again later." },
-      { status: 500 }
+      { error: "We could not save your request because the event database is unavailable. Please try again later." },
+      { status: 503 }
     );
   }
 }

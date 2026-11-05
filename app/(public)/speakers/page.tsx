@@ -3,101 +3,74 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
+const proposedSpeakers = [
+  { name: "Falguni Nayar", designation: "Founder, Executive Chairperson and MD, Nykaa", industry: "E-commerce and Retail", sessionTopic: "From Startup to Success - Building a Powerful Business Brand", day: 1 },
+  { name: "Priya Nair", designation: "CEO and MD, Hindustan Unilever", industry: "FMCG and Marketing", sessionTopic: "Brand Building, Consumer Behaviour and Marketing Strategies", day: 1 },
+  { name: "Kalyan Krishnamurthy", designation: "Group CEO, Flipkart", industry: "E-commerce and Digital Business", sessionTopic: "Business Expansion, Competition and E-commerce Growth", day: 1 },
+  { name: "K. Krithivasan", designation: "CEO and MD, Tata Consultancy Services", industry: "IT and Technology", sessionTopic: "Artificial Intelligence, Digital Transformation and Future Business", day: 2 },
+  { name: "Anup Bagchi", designation: "MD and CEO, HDFC Bank", industry: "Banking and Finance", sessionTopic: "Financial Management, Risk and Sustainable Business Growth", day: 2 },
+  { name: "C. Vijayakumar", designation: "CEO and MD, HCLTech", industry: "IT Services and Technology", sessionTopic: "Global Business Leadership, Innovation and Organisational Growth", day: 2 },
+];
+
 export default async function SpeakersPage() {
-  let event = null;
-  let speakers: any[] = [];
+  let speakers: any[] = proposedSpeakers;
+  let showSpeakers = true;
 
   try {
-    event = await prisma.event.findFirst({ where: { isPublished: true } });
-    if (event?.showProposedSpeakers) {
-      speakers = await prisma.speaker.findMany({
-        where: {
-          eventId: event.id,
-          status: { in: ["Proposed", "Invited", "Confirmed"] },
-        },
+    const event = await prisma.event.findFirst({ where: { isPublished: true } });
+    if (event) {
+      showSpeakers = event.showProposedSpeakers;
+      const databaseSpeakers = await prisma.speaker.findMany({
+        where: { eventId: event.id, status: { in: ["Proposed", "Invited", "Confirmed"] } },
         orderBy: [{ day: "asc" }, { sortOrder: "asc" }],
       });
+      // Use database-managed profiles when available; otherwise show the published proposed lineup.
+      if (databaseSpeakers.length > 0) speakers = databaseSpeakers;
     }
   } catch {
-    // DB not ready
+    // Keep the public proposed lineup visible while database setup is pending.
   }
-
-  const showSpeakers = event?.showProposedSpeakers ?? true;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
-      <div className="text-center mb-12">
+      <div className="mb-12 text-center">
         <span className="badge-invite mb-4 inline-block">Invitation Only</span>
-        <h1 className="text-3xl font-bold text-white sm:text-4xl">Speakers</h1>
-        <p className="mt-2 text-zinc-400">
-          Proposed business leaders for THE CEO CONCLAVE 2027
-        </p>
+        <h1 className="text-3xl font-bold text-white sm:text-4xl">Our Speakers</h1>
+        <p className="mt-2 text-zinc-400">Business leaders and industry voices proposed for THE CEO CONCLAVE 2027</p>
       </div>
 
-      {!showSpeakers || speakers.length === 0 ? (
-        <div className="glass-card p-12 text-center max-w-lg mx-auto">
-          <h2 className="text-xl font-semibold text-white">Speakers to be announced</h2>
-          <p className="mt-3 text-zinc-400">
-            Speaker lineup will be published once confirmed. Stay tuned.
-          </p>
-          <Link href="/request-invitation" className="btn-glow mt-6 inline-block">
-            Request Invitation
-          </Link>
+      {!showSpeakers ? (
+        <div className="glass-card mx-auto max-w-lg p-12 text-center">
+          <h2 className="text-xl font-semibold text-white">Speaker lineup coming soon</h2>
+          <p className="mt-3 text-zinc-400">The speaker lineup will be published once it is ready.</p>
+          <Link href="/request-invitation" className="btn-glow mt-6 inline-block">Request Invitation</Link>
         </div>
       ) : (
         <>
-          <p className="text-center text-sm text-zinc-500 mb-10">
-            All speakers shown are proposed invitees. Participation is subject to confirmation.
-          </p>
-
+          <p className="mb-10 text-center text-sm text-zinc-500">All listed speakers are proposed invitees. Their participation is subject to confirmation.</p>
           {[1, 2].map((day) => {
-            const daySpeakers = speakers.filter((s) => s.day === day);
-            if (daySpeakers.length === 0) return null;
+            const daySpeakers = speakers.filter((speaker) => speaker.day === day);
             return (
-              <div key={day} className="mb-16">
-                <h2 className="text-xl font-semibold text-white mb-6">
-                  Day {day} · {day === 1 ? "22 January 2027" : "23 January 2027"}
-                </h2>
+              <section key={day} className="mb-16">
+                <h2 className="mb-6 text-xl font-semibold text-white">Day {day} · {day === 1 ? "22 January 2027" : "23 January 2027"}</h2>
                 <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                   {daySpeakers.map((speaker) => (
-                    <div key={speaker.id} className="glass-card p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-purple-500/30 to-blue-500/30 text-lg font-semibold text-purple-200">
-                          {speaker.name
-                            .split(" ")
-                            .map((n: string) => n[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </div>
-                        <span
-                          className={
-                            speaker.status === "Confirmed"
-                              ? "badge-confirmed"
-                              : "badge-proposed"
-                          }
-                        >
-                          {speaker.status}
-                        </span>
+                    <article key={speaker.id ?? speaker.name} className="glass-card p-6 transition-transform duration-300 hover:-translate-y-1">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-purple-500/30 to-blue-500/30 text-xl font-bold text-purple-200 ring-1 ring-purple-400/30">
+                        {speaker.name.split(" ").map((part: string) => part[0]).join("").slice(0, 2)}
                       </div>
-                      <h3 className="mt-4 text-lg font-semibold text-white">
-                        {speaker.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-zinc-400">{speaker.designation}</p>
+                      <div className="mt-5 flex items-start justify-between gap-3">
+                        <h3 className="text-lg font-semibold text-white">{speaker.name}</h3>
+                        <span className={speaker.status === "Confirmed" ? "badge-confirmed" : "badge-proposed"}>{speaker.status ?? "Proposed"}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-zinc-300">{speaker.designation}</p>
                       <p className="mt-1 text-xs text-zinc-500">{speaker.industry}</p>
-                      {speaker.sessionTopic && (
-                        <p className="mt-4 text-sm text-purple-300/90 border-t border-white/5 pt-3">
-                          {speaker.sessionTopic}
-                        </p>
-                      )}
-                      {speaker.status !== "Confirmed" && (
-                        <p className="mt-3 text-xs text-zinc-600">
-                          Proposed invitee. Participation subject to confirmation.
-                        </p>
-                      )}
-                    </div>
+                      {speaker.sessionTopic && <p className="mt-4 border-t border-white/10 pt-4 text-sm leading-relaxed text-purple-300/90">{speaker.sessionTopic}</p>}
+                      <p className="mt-4 text-xs text-zinc-500">Proposed invitee · Participation subject to confirmation</p>
+                    </article>
                   ))}
                 </div>
-              </div>
+              </section>
             );
           })}
         </>

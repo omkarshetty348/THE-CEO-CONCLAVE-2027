@@ -1,0 +1,19 @@
+CEO CONCLAVE 2027 — DEPLOYMENT FIX
+
+This ZIP has been flattened so package.json, app/, components/, prisma/, and next.config.ts
+are at the project root (not inside an extra ceo-conclave-2027/ folder).
+
+If uploading this ZIP to a NEW GitHub repository:
+1. Extract this ZIP.
+2. Upload the CONTENTS of this folder to the repository root.
+3. In Vercel, import that repository.
+4. Set Framework Preset to Next.js and Root Directory to ./ (repository root).
+5. Set the environment variables from .env.example / README.md.
+6. Redeploy.
+
+If keeping an EXISTING GitHub repository where all project files are inside
+ceo-conclave-2027/:
+Vercel > Project Settings > Build and Deployment > Root Directory
+must be set to ceo-conclave-2027 (not ./).
+
+Do not commit real .env.local values or secrets.

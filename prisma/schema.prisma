@@ -1,0 +1,587 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH & RBAC ====================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String
+  image         String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  roles         UserRole[]
+  auditLogs     AuditLog[]
+  checkIns      CheckIn[]
+  emailLogs     EmailLog[]
+
+  @@index([email])
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // Super Admin, Event Manager, etc.
+  description String?
+  isSystem    Boolean  @default(false) // cannot delete system roles
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "requests.approve", "speakers.manage"
+  name        String
+  description String?
+  module      String   // requests, speakers, sponsors, etc.
+
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// ==================== EVENT CORE ====================
+
+model Event {
+  id              String   @id @default(cuid())
+  name            String   @default("THE CEO CONCLAVE 2027")
+  tagline         String   @default("One Platform. Powerful Perspectives.")
+  category        String   @default("Business & Corporate | CEO Round Table Discussion")
+  subcategory     String   @default("Leadership & Entrepreneurship Summit")
+  startDate       DateTime @default(dbgenerated("'2027-01-22'::date"))
+  endDate         DateTime @default(dbgenerated("'2027-01-23'::date"))
+  dailyStartTime  String   @default("09:30")
+  dailyEndTime    String   @default("16:00")
+  timezone        String   @default("Asia/Kolkata")
+  venueName       String   @default("ITC Gardenia")
+  venueAddress    String   @default("1, Residency Road, Ashok Nagar, Bengaluru, Karnataka - 560025")
+  proposedHall    String   @default("Mysore Hall")
+  format          String   @default("Individual sessions, panel discussions and audience Q&A")
+  entryType       String   @default("Invitation only")
+  expectedAudience Int     @default(180)
+  vision          String   @db.Text
+  aboutText       String   @db.Text
+  disclaimer      String   @db.Text
+  googleMapsEmbed String?  @db.Text
+  googleMapsLink  String?
+  showProposedSpeakers Boolean @default(true)
+  hardCapacityLimit    Boolean @default(false)
+  capacityLimit        Int     @default(180)
+  announcementBanner   String?
+  isPublished          Boolean @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  settings        EventSetting[]
+  pages           Page[]
+  sessions        Session[]
+  speakers        Speaker[]
+  sponsorCategories SponsorCategory[]
+  sponsors        Sponsor[]
+}
+
+model EventSetting {
+  id        String   @id @default(cuid())
+  eventId   String
+  key       String
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, key])
+}
+
+model Page {
+  id          String   @id @default(cuid())
+  eventId     String
+  slug        String   // home, about, speakers, agenda, etc.
+  title       String
+  metaTitle   String?
+  metaDesc    String?
+  isEnabled   Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sections    PageSection[]
+
+  @@unique([eventId, slug])
+}
+
+model PageSection {
+  id        String   @id @default(cuid())
+  pageId    String
+  key       String   // hero, about_summary, stats, etc.
+  title     String?
+  content   String?  @db.Text
+  data      Json?    // flexible structured content
+  sortOrder Int      @default(0)
+  isVisible Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  page      Page     @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, key])
+}
+
+// ==================== SPEAKERS & AGENDA ====================
+
+model Speaker {
+  id            String   @id @default(cuid())
+  eventId       String
+  name          String
+  designation   String
+  company       String?
+  industry      String?
+  bio           String?  @db.Text
+  photoUrl      String?
+  sessionTopic  String?
+  day           Int      // 1 or 2
+  socialLink    String?
+  status        String   @default("Proposed") // Proposed, Invited, Confirmed, Declined
+  sortOrder     Int      @default(0)
+  privateNotes  String?  @db.Text // travel, hospitality, AV needs
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sessions      SessionSpeaker[]
+
+  @@index([eventId, status])
+  @@index([day])
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  eventId     String
+  day         Int      // 1 or 2
+  startTime   String   // "09:30"
+  endTime     String   // "10:00"
+  title       String
+  description String?  @db.Text
+  type        String   @default("session") // registration, inauguration, keynote, break, lunch, roundtable, qa, closing
+  sortOrder   Int      @default(0)
+  isVisible   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  speakers    SessionSpeaker[]
+
+  @@index([eventId, day])
+}
+
+model SessionSpeaker {
+  sessionId String
+  speakerId String
+
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  speaker   Speaker @relation(fields: [speakerId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, speakerId])
+}
+
+// ==================== SPONSORS ====================
+
+model SponsorCategory {
+  id          String   @id @default(cuid())
+  eventId     String
+  name        String   // Title Sponsor, Presenting Sponsor, etc.
+  benefits    String?  @db.Text
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  sponsors    Sponsor[]
+}
+
+model Sponsor {
+  id          String   @id @default(cuid())
+  eventId     String
+  categoryId  String?
+  name        String
+  logoUrl     String?
+  website     String?
+  status      String   @default("Enquiry") // Enquiry, In Discussion, Confirmed, Declined
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  event       Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  category    SponsorCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+}
+
+model SponsorEnquiry {
+  id              String   @id @default(cuid())
+  companyName     String
+  contactPerson   String
+  email           String
+  phone           String?
+  interestedCategory String?
+  message         String?  @db.Text
+  status          String   @default("New") // New, In Discussion, Confirmed, Declined
+  adminNotes      String?  @db.Text
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([email])
+}
+
+// ==================== INVITATION & REGISTRATION ====================
+
+model FormField {
+  id          String   @id @default(cuid())
+  key         String   @unique // fullName, email, mobile, etc.
+  label       String
+  type        String   // text, email, tel, select, textarea, checkbox
+  options     Json?    // for select fields
+  isRequired  Boolean  @default(true)
+  isVisible   Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  placeholder String?
+  helpText    String?
+  showWhen    Json?    // conditional visibility e.g. { field: "category", value: "MBA / BBA Student" }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model InvitationRequest {
+  id              String   @id @default(cuid())
+  referenceId     String   @unique // e.g. CC27-XXXXXX
+  fullName        String
+  email           String
+  mobile          String
+  organisation    String
+  designation     String
+  audienceCategory String  // CEO / Business Leader, Entrepreneur..., etc.
+  city            String?
+  daysAttending   String   // Day1, Day2, Both
+  linkedinUrl     String?
+  whyAttend       String?  @db.Text
+  studentIdOrCollege String?
+  privacyConsent  Boolean  @default(false)
+  termsConsent    Boolean  @default(false)
+  mediaConsent    Boolean  @default(false)
+  status          String   @default("Pending") // Pending, Approved, Waitlisted, Rejected, Cancelled
+  adminNote       String?  @db.Text
+  reviewedAt      DateTime?
+  reviewedById    String?
+  directInviteId  String?  // if came from direct invitation
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  answers         RequestAnswer[]
+  pass            Pass?
+  directInvite    DirectInvitation? @relation(fields: [directInviteId], references: [id])
+
+  @@index([email])
+  @@index([status])
+  @@index([referenceId])
+  @@index([audienceCategory])
+}
+
+model RequestAnswer {
+  id        String @id @default(cuid())
+  requestId String
+  fieldKey  String
+  value     String @db.Text
+
+  request   InvitationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, fieldKey])
+}
+
+model DirectInvitation {
+  id            String   @id @default(cuid())
+  email         String
+  fullName      String
+  organisation  String?
+  designation   String?
+  audienceCategory String?
+  invitationCode String  @unique
+  uniqueLinkToken String @unique
+  expiresAt     DateTime
+  status        String   @default("Sent") // Sent, Opened, Accepted, Expired, Revoked
+  note          String?  @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  openedAt      DateTime?
+  acceptedAt    DateTime?
+
+  requests      InvitationRequest[]
+
+  @@index([email])
+  @@index([status])
+}
+
+// ==================== PASSES & CHECK-IN ====================
+
+model Pass {
+  id              String   @id @default(cuid())
+  requestId       String   @unique
+  registrationId  String   @unique // public facing
+  passNumber      String   @unique
+  verificationToken String @unique // long random token inside QR
+  qrCodeDataUrl   String?  @db.Text // base64 data URL for convenience
+  daysApproved    String   // Day1, Day2, Both
+  status          String   @default("Active") // Active, Cancelled, Expired
+  contactId       String?  // assigned SPOC
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  cancelledAt     DateTime?
+
+  request         InvitationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  contact         Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  checkIns        CheckIn[]
+  verifications   PassVerification[]
+
+  @@index([verificationToken])
+  @@index([passNumber])
+  @@index([registrationId])
+}
+
+model PassVerification {
+  id        String   @id @default(cuid())
+  passId    String
+  result    String   // Valid, Already Checked In, Cancelled, Wrong Day, Invalid
+  day       Int?     // 1 or 2
+  scannedAt DateTime @default(now())
+  staffId   String?
+  ipAddress String?
+  userAgent String?
+
+  pass      Pass     @relation(fields: [passId], references: [id], onDelete: Cascade)
+}
+
+model CheckIn {
+  id          String   @id @default(cuid())
+  passId      String
+  day         Int      // 1 or 2
+  checkedInAt DateTime @default(now())
+  staffId     String?
+  override    Boolean  @default(false)
+  notes       String?
+
+  pass        Pass     @relation(fields: [passId], references: [id], onDelete: Cascade)
+  staff       User?    @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@unique([passId, day]) // one check-in per day unless override handled in app logic
+  @@index([day])
+}
+
+// ==================== ORGANISER CONTACTS (SPOC) ====================
+
+model Contact {
+  id          String   @id @default(cuid())
+  name        String
+  role        String   // Registration Coordinator, Speaker Coordinator, etc.
+  email       String
+  phone       String?
+  whatsapp    String?
+  photoUrl    String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  assignments ContactAssignment[]
+  passes      Pass[]
+}
+
+model ContactAssignment {
+  id                String @id @default(cuid())
+  contactId         String
+  audienceCategory  String // matches InvitationRequest.audienceCategory
+
+  contact           Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, audienceCategory])
+}
+
+// ==================== EMAIL SYSTEM ====================
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  key         String   @unique // request_received, request_approved, etc.
+  name        String
+  subject     String
+  heading     String?
+  bodyHtml    String   @db.Text
+  bodyText    String?  @db.Text
+  isActive    Boolean  @default(true)
+  variables   String[] // list of supported {{vars}}
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailCampaign {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  bodyHtml    String   @db.Text
+  status      String   @default("Draft") // Draft, Scheduled, Sending, Sent, Cancelled
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  recipientGroup String? // all_approved, by_category, etc.
+  filters     Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipients  EmailRecipient[]
+  logs        EmailLog[]
+}
+
+model EmailRecipient {
+  id         String   @id @default(cuid())
+  campaignId String
+  email      String
+  name       String?
+  status     String   @default("Pending") // Pending, Sent, Failed, Bounced
+  sentAt     DateTime?
+  error      String?
+
+  campaign   EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status])
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  toEmail     String
+  subject     String
+  templateKey String?
+  campaignId  String?
+  status      String   // queued, sent, delivered, bounced, failed
+  resendId    String?
+  error       String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  userId      String?  // who triggered it
+
+  campaign    EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  user        User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([toEmail])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Reminder {
+  id          String   @id @default(cuid())
+  name        String
+  subject     String
+  bodyHtml    String   @db.Text
+  recipientGroup String
+  filters     Json?
+  scheduledAt DateTime
+  timezone    String   @default("Asia/Kolkata")
+  status      String   @default("Scheduled") // Scheduled, Sent, Cancelled, Failed
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipients  ReminderRecipient[]
+}
+
+model ReminderRecipient {
+  id         String   @id @default(cuid())
+  reminderId String
+  email      String
+  name       String?
+  status     String   @default("Pending")
+  sentAt     DateTime?
+  error      String?
+
+  reminder   Reminder @relation(fields: [reminderId], references: [id], onDelete: Cascade)
+
+  @@index([reminderId, status])
+}
+
+// ==================== CONTACT FORM & MEDIA ====================
+
+model ContactMessage {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  subject   String?
+  message   String   @db.Text
+  status    String   @default("New") // New, Read, Replied, Archived
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
+model MediaAsset {
+  id          String   @id @default(cuid())
+  filename    String
+  url         String
+  publicId    String?  // Cloudinary public_id
+  mimeType    String?
+  size        Int?
+  altText     String?
+  category    String?  // poster, press, gallery, speaker, etc.
+  createdAt   DateTime @default(now())
+}
+
+// ==================== AUDIT & SYSTEM ====================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // CREATE, UPDATE, DELETE, APPROVE, LOGIN, etc.
+  entity    String   // InvitationRequest, Speaker, etc.
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
